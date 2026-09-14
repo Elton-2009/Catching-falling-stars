@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Catch the Stars</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: Arial, sans-serif;
+    background: #10152b;
+    color: white;
+    display: flex;
+    justify-content: center;
+    min-height: 100vh;
+  }
+  .wrap {
+    width: min(900px, 100%);
+    padding: 16px;
+    text-align: center;
+  }
+  h1 { margin: 8px 0; }
+  .info {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    max-width: 700px;
+    margin: 10px auto;
+    font-size: 18px;
+    font-weight: bold;
+  }
+  canvas {
+    width: 100%;
+    max-width: 700px;
+    aspect-ratio: 16 / 10;
+    border: 2px solid #fff;
+    border-radius: 14px;
+    background: #080b18;
+    touch-action: none;
+  }
+  button {
+    margin-top: 12px;
+    padding: 12px 24px;
+    border: 0;
+    border-radius: 10px;
+    font-size: 17px;
+    font-weight: bold;
+    cursor: pointer;
+  }
+  p { opacity: .8; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>⭐ Catch the Stars</h1>
+  <p>Move the basket and catch the falling stars. Miss 5 and the game ends!</p>
+  <div class="info">
+    <span>Score: <span id="score">0</span></span>
+    <span>Lives: <span id="lives">5</span></span>
+    <span>Best: <span id="best">0</span></span>
+  </div>
+  <canvas id="game" width="700" height="440"></canvas>
+  <br>
+  <button id="restart">Restart Game</button>
+  <p>Keyboard: ← → or A/D &nbsp; • &nbsp; Phone: drag the basket</p>
+</div>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+const scoreEl = document.getElementById("score");
+const livesEl = document.getElementById("lives");
+const bestEl = document.getElementById("best");
+const restartBtn = document.getElementById("restart");
+
+let score, lives, best, stars, particles, gameOver, keys, lastTime, spawnTimer;
+const basket = { x: 310, y: 390, w: 80, h: 24, speed: 430 };
+
+best = Number(localStorage.getItem("catchStarsBest") || 0);
+bestEl.textContent = best;
+
+function reset() {
+  score = 0;
+  lives = 5;
+  stars = [];
+  particles = [];
+  gameOver = false;
+  keys = {};
+  lastTime = performance.now();
+  spawnTimer = 0;
+  basket.x = canvas.width / 2 - basket.w / 2;
+  updateUI();
+  requestAnimationFrame(loop);
+}
+
+function updateUI() {
+  scoreEl.textContent = score;
+  livesEl.textContent = lives;
+  bestEl.textContent = best;
+}
+
+function spawnStar() {
+  const r = 8 + Math.random() * 7;
+  stars.push({
+    x: r + Math.random() * (canvas.width - r * 2),
+    y: -20,
+    r,
+    speed: 120 + Math.random() * 120 + score * 2,
+    spin: Math.random() * Math.PI
+  });
+}
+
+function makeParticles(x, y) {
+  for (let i = 0; i < 10; i++) {
+    particles.push({
+      x, y,
+      vx: (Math.random() - .5) * 180,
+      vy: (Math.random() - .5) * 180,
+      life: .5
+    });
+  }
+}
+
+function drawStar(x, y, r, rot) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(rot);
+  ctx.beginPath();
+  for (let i = 0; i < 10; i++) {
+    const rr = i % 2 === 0 ? r : r * .45;
+    const a = -Math.PI / 2 + i * Math.PI / 5;
+    ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr);
+  }
+  ctx.closePath();
+  ctx.fillStyle = "#ffd84d";
+  ctx.fill();
+  ctx.restore();
+}
+
+function draw() {
+  // Background
+  ctx.fillStyle = "#080b18";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Stars in background
+  ctx.fillStyle = "rgba(255,255,255,.7)";
+  for (let i = 0; i < 70; i++) {
+    const x = (i * 97) % canvas.width;
+    const y = (i * 53) % canvas.height;
+    ctx.fillRect(x, y, 2, 2);
+  }
+
+  stars.forEach(s => drawStar(s.x, s.y, s.r, s.spin));
+
+  // Basket
+  ctx.fillStyle = "#55d6be";
+  ctx.fillRect(basket.x, basket.y, basket.w, basket.h);
+  ctx.fillStyle = "#2b8f83";
+  ctx.fillRect(basket.x + 8, basket.y + basket.h, basket.w - 16, 8);
+
+  // Particles
+  particles.forEach(p => {
+    ctx.globalAlpha = Math.max(0, p.life * 2);
+    ctx.fillStyle = "#ffd84d";
+    ctx.fillRect(p.x, p.y, 4, 4);
+  });
+  ctx.globalAlpha = 1;
+
+  if (gameOver) {
+    ctx.fillStyle = "rgba(0,0,0,.7)";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "white";
+    ctx.textAlign = "center";
+    ctx.font = "bold 44px Arial";
+    ctx.fillText("GAME OVER", canvas.width / 2, 190);
+    ctx.font = "24px Arial";
+    ctx.fillText("Score: " + score, canvas.width / 2, 235);
+    ctx.font = "18px Arial";
+    ctx.fillText("Press Restart to play again", canvas.width / 2, 275);
+  }
+}
+
+function loop(now) {
+  if (gameOver) { draw(); return; }
+
+  const dt = Math.min((now - lastTime) / 1000, .035);
+  lastTime = now;
+
+  let dir = 0;
+  if (keys.ArrowLeft || keys.a) dir--;
+  if (keys.ArrowRight || keys.d) dir++;
+  basket.x += dir * basket.speed * dt;
+  basket.x = Math.max(0, Math.min(canvas.width - basket.w, basket.x));
+
+  spawnTimer += dt;
+  const spawnEvery = Math.max(.28, .75 - score * .008);
+  if (spawnTimer >= spawnEvery) {
+    spawnTimer = 0;
+    spawnStar();
+  }
+
+  for (let i = stars.length - 1; i >= 0; i--) {
+    const s = stars[i];
+    s.y += s.speed * dt;
+    s.spin += dt * 2;
+
+    const caught =
+      s.y + s.r >= basket.y &&
+      s.y - s.r <= basket.y + basket.h &&
+      s.x >= basket.x &&
+      s.x <= basket.x + basket.w;
+
+    if (caught) {
+      score++;
+      makeParticles(s.x, s.y);
+      stars.splice(i, 1);
+      if (score > best) {
+        best = score;
+        localStorage.setItem("catchStarsBest", best);
+      }
+    } else if (s.y - s.r > canvas.height) {
+      lives--;
+      stars.splice(i, 1);
+      if (lives <= 0) gameOver = true;
+    }
+  }
+
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.life -= dt;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+
+  updateUI();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+window.addEventListener("keydown", e => {
+  keys[e.key] = true;
+  if (["ArrowLeft", "ArrowRight", " "].includes(e.key)) e.preventDefault();
+});
+window.addEventListener("keyup", e => keys[e.key] = false);
+
+function moveBasket(clientX) {
+  const rect = canvas.getBoundingClientRect();
+  const x = (clientX - rect.left) * (canvas.width / rect.width);
+  basket.x = x - basket.w / 2;
+  basket.x = Math.max(0, Math.min(canvas.width - basket.w, basket.x));
+}
+canvas.addEventListener("pointerdown", e => {
+  moveBasket(e.clientX);
+  canvas.setPointerCapture(e.pointerId);
+});
+canvas.addEventListener("pointermove", e => {
+  if (e.buttons) moveBasket(e.clientX);
+});
+restartBtn.addEventListener("click", reset);
+
+reset();
+</script>
+</body>
+</html>
